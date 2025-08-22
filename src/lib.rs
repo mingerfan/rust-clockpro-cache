@@ -6,7 +6,7 @@ extern crate bitflags;
 use crate::token_ring::{Token, TokenRing};
 use std::borrow::Borrow;
 use std::collections::HashMap;
-use std::hash::Hash;
+use std::hash::{BuildHasher, Hash};
 use std::mem::MaybeUninit;
 
 bitflags! {
@@ -37,11 +37,11 @@ impl<K, V> Default for Node<K, V> {
 }
 
 /// A CLOCK-Pro cache that maps keys to values.
-pub struct ClockProCache<K, V> {
+pub struct ClockProCache<K, V, S = std::hash::RandomState> {
     capacity: usize,
     test_capacity: usize,
     cold_capacity: usize,
-    map: HashMap<K, Token>,
+    map: HashMap<K, Token, S>,
     ring: TokenRing,
     nodes: Vec<Node<K, V>>,
     hand_hot: Token,
@@ -54,7 +54,7 @@ pub struct ClockProCache<K, V> {
     evicted: u64,
 }
 
-impl<K, V> ClockProCache<K, V>
+impl <K, V> ClockProCache<K, V, std::hash::RandomState>
 where
     K: Eq + Hash + Clone,
 {
@@ -82,6 +82,38 @@ where
             cold_capacity: capacity,
             map: HashMap::with_capacity(capacity + test_capacity),
             ring: TokenRing::with_capacity(capacity + test_capacity),
+            nodes,
+            hand_hot: 0,
+            hand_cold: 0,
+            hand_test: 0,
+            count_hot: 0,
+            count_cold: 0,
+            count_test: 0,
+            inserted: 0,
+            evicted: 0,
+        };
+        Ok(cache)
+    }
+}
+
+impl<K, V, S> ClockProCache<K, V, S>
+where
+    K: Eq + Hash + Clone,
+    S: BuildHasher,
+{
+    /// Create a new cache with the given capacity and hasher
+    pub fn with_hasher(capacity: usize, hash_builder: S)  -> Result<Self, &'static str> {
+        if capacity < 3 {
+            return Err("Cache size cannot be less than 3 entries");
+        }
+        let mut nodes = Vec::with_capacity(capacity + capacity);
+        nodes.resize_with(capacity + capacity, Node::default);
+        let cache = ClockProCache {
+            capacity,
+            test_capacity: capacity,
+            cold_capacity: capacity,
+            map: HashMap::with_capacity_and_hasher(capacity + capacity, hash_builder),
+            ring: TokenRing::with_capacity(capacity + capacity),
             nodes,
             hand_hot: 0,
             hand_cold: 0,
